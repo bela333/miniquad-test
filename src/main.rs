@@ -62,7 +62,16 @@ impl Stage {
                 },
                 shader::meta(),
             )
-            .unwrap();
+            .unwrap_or_else(|err|{
+                match err {
+                    ShaderError::CompilationError { shader_type, error_message } => {
+                        println!("A {:?} error has occured:", shader_type);
+                        println!("{}", error_message);
+                        panic!()
+                    },
+                    _ => panic!("{:?}", err)
+                }
+            });
 
         let pipeline = ctx.new_pipeline_with_params(
             &[BufferLayout::default()],
@@ -149,19 +158,14 @@ impl EventHandler for Stage {
         let uniforms = Uniforms{
             perspective: self.perspective,
             view: self.world_mat,
-            world: Matrix4::from_translation(vec3(0.0, 0.0, -0.3))
+            world: [
+                Matrix4::from_translation(vec3(0.0, 0.0, -0.3)),
+                Matrix4::from_translation(vec3(0.0, 0.0, -0.5))
+            ]
         };
         self.ctx.apply_uniforms(UniformsSource::table(&uniforms));
 
-        self.ctx.draw(0, 3, 1);
-        let uniforms = Uniforms{
-            perspective: self.perspective,
-            view: self.world_mat,
-            world: Matrix4::identity()
-        };
-        self.ctx.apply_uniforms(UniformsSource::table(&uniforms));
-
-        self.ctx.draw(0, 3, 1);
+        self.ctx.draw(0, 3, 2);
 
         self.ctx.end_render_pass();
 
@@ -180,27 +184,9 @@ mod shader {
     use cgmath::Matrix4;
     use miniquad::*;
 
-    pub const VERTEX: &str = r#"#version 100
-    attribute vec3 in_pos;
-    attribute vec4 in_color;
+    pub const VERTEX: &str = include_str!("shaders/instanced.vert");
 
-    varying lowp vec4 color;
-
-    uniform mat4 perspective;
-    uniform mat4 view;
-    uniform mat4 world;
-
-    void main() {
-        gl_Position = perspective*view*world*vec4(in_pos, 1.0);
-        color = in_color;
-    }"#;
-
-    pub const FRAGMENT: &str = r#"#version 100
-    varying lowp vec4 color;
-
-    void main() {
-        gl_FragColor = color;
-    }"#;
+    pub const FRAGMENT: &str = include_str!("shaders/basic.frag");
 
     pub fn meta() -> ShaderMeta {
         ShaderMeta {
@@ -208,7 +194,7 @@ mod shader {
             uniforms: UniformBlockLayout { uniforms: vec![
                 UniformDesc{array_count: 1, name: "perspective".to_owned(), uniform_type: UniformType::Mat4},
                 UniformDesc{array_count: 1, name: "view".to_owned(), uniform_type: UniformType::Mat4},
-                UniformDesc{array_count: 1, name: "world".to_owned(), uniform_type: UniformType::Mat4}
+                UniformDesc{array_count: 2, name: "world".to_owned(), uniform_type: UniformType::Mat4}
             ] },
         }
     }
@@ -216,6 +202,6 @@ mod shader {
     pub struct Uniforms{
         pub perspective: Matrix4<f32>,
         pub view: Matrix4<f32>,
-        pub world: Matrix4<f32>
+        pub world: [Matrix4<f32>; 2]
     }
 }
