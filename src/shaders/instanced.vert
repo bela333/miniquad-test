@@ -1,8 +1,8 @@
 #version 140
-attribute vec3 in_pos;
-attribute vec4 in_color;
+in vec3 in_pos;
+in vec4 in_color;
 
-varying lowp vec4 color;
+out lowp vec4 color;
 
 uniform mat4 perspective;
 uniform mat4 view;

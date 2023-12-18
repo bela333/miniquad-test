@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Instant};
 
-use miniquad::{*, gl::glLinkProgram};
-use cgmath::{Vector3, Vector4, Vector2, vec2, vec4, Matrix4, SquareMatrix, vec3, Perspective, perspective, Deg, Point3, point3, Matrix3, Transform, EuclideanSpace};
+use miniquad::{*};
+use cgmath::{Vector3, Vector4, vec4, Matrix4, SquareMatrix, vec3, perspective, Deg, Point3, point3, Matrix3, EuclideanSpace, Rad, Basis3, Rotation3};
 use shader::Uniforms;
 
 #[repr(C)]
@@ -16,15 +16,22 @@ struct Stage {
     ctx: Box<dyn RenderingBackend>,
     perspective: Matrix4<f32>,
     camera_pos: Point3<f32>,
-    camera_target: Point3<f32>,
-    world_mat: Matrix4<f32>,
+    view: Matrix4<f32>,
     keys_down: HashSet<KeyCode>,
-    last_frame: Instant
+    last_frame: Instant,
+    rotate_x: f32,
+    rotate_y: f32,
+    fov: f32,
+    near: f32,
+    far: f32
 }
 
 impl Stage {
     pub fn new() -> Stage {
         let mut ctx: Box<dyn RenderingBackend> = window::new_rendering_backend();
+
+        window::show_mouse(false);
+        window::set_cursor_grab(true);
 
         #[rustfmt::skip]
         let vertices: [Vertex; 3] = [
@@ -47,7 +54,7 @@ impl Stage {
 
         let bindings = Bindings {
             vertex_buffers: vec![vertex_buffer],
-            index_buffer: index_buffer,
+            index_buffer,
             images: vec![],
         };
 
@@ -90,16 +97,24 @@ impl Stage {
 
         let screen_size = window::screen_size();
 
+        let fov = 80.0;
+        let near = 0.1;
+        let far = 100.0;
+
         Stage {
             pipeline,
             bindings,
             ctx,
             camera_pos: point3(0.0, 0.0, 1.0),
-            camera_target: point3(0.0, 0.0, 0.0),
-            perspective: perspective(Deg(90.0), screen_size.0/screen_size.1, 0.1, 100.0),
-            world_mat: Matrix4::identity(),
+            perspective: perspective(Deg(fov), screen_size.0/screen_size.1, near, far),
+            view: Matrix4::identity(),
             keys_down: HashSet::new(),
-            last_frame: Instant::now()
+            last_frame: Instant::now(),
+            rotate_x: 0.0,
+            rotate_y: 0.0,
+            fov,
+            near,
+            far,
         }
     }
 }
@@ -110,26 +125,30 @@ impl EventHandler for Stage {
         let delta_time = self.last_frame.elapsed();
         self.last_frame = Instant::now();
 
+        let forward = vec3(-self.rotate_y.sin(), 0.0, -self.rotate_y.cos());
+        let right = vec3(self.rotate_y.cos(), 0.0, -self.rotate_y.sin());
+
         if self.keys_down.contains(&KeyCode::W) {
-            self.camera_pos.z -= delta_time.as_secs_f32();
+            self.camera_pos += forward*delta_time.as_secs_f32();
         }
 
         if self.keys_down.contains(&KeyCode::A) {
-            self.camera_pos.x -= delta_time.as_secs_f32();
+            self.camera_pos += -right*delta_time.as_secs_f32();
         }
 
         if self.keys_down.contains(&KeyCode::S) {
-            self.camera_pos.z += delta_time.as_secs_f32();
+            self.camera_pos += -forward*delta_time.as_secs_f32();
         }
 
         if self.keys_down.contains(&KeyCode::D) {
-            self.camera_pos.x += delta_time.as_secs_f32();
+            self.camera_pos += right*delta_time.as_secs_f32();
         }
 
-        let look_at = Matrix3::look_at_rh(self.camera_pos, self.camera_target, vec3(0.0, 1.0, 0.0));
-        let translate  = Matrix4::from_translation(-self.camera_pos.to_vec());
-        let look_at: Matrix4<f32> = look_at.into();
-        self.world_mat = look_at*translate;
+        let rotate = Basis3::from_angle_y(Rad(self.rotate_y))*Basis3::from_angle_x(Rad(self.rotate_x));
+        let rotate: Matrix3<f32> = rotate.into();
+        let rotate: Matrix4<f32> = rotate.into();
+        let translate  = Matrix4::from_translation(self.camera_pos.to_vec());
+        self.view = (translate*rotate).invert().unwrap();
 
 
 
@@ -141,11 +160,27 @@ impl EventHandler for Stage {
         if _repeat {
             return;
         }
+        match _keycode{
+            KeyCode::Escape => {
+                window::quit();
+            }
+            _ => ()
+        }
         self.keys_down.insert(_keycode);
     }
 
     fn key_up_event(&mut self, _keycode: KeyCode, _keymods: KeyMods) {
         self.keys_down.remove(&_keycode);
+    }
+
+    fn resize_event(&mut self, width: f32, height: f32) {
+        self.perspective = perspective(Deg(self.fov), width/height, self.near, self.far);
+    }
+
+    fn raw_mouse_motion(&mut self, dx: f32, dy: f32) {
+        println!("{}, {}", dx, dy);
+        self.rotate_x += -dy*0.01;
+        self.rotate_y += -dx*0.01;
     }
 
     fn draw(&mut self) {
@@ -157,7 +192,7 @@ impl EventHandler for Stage {
         
         let uniforms = Uniforms{
             perspective: self.perspective,
-            view: self.world_mat,
+            view: self.view,
             world: [
                 Matrix4::from_translation(vec3(0.0, 0.0, -0.3)),
                 Matrix4::from_translation(vec3(0.0, 0.0, -0.5))
